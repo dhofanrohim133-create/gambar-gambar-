@@ -1,0 +1,10 @@
+{
+  "name": "gambar-bareng",
+  "version": "1.0.0",
+  "description": "Kanvas gambar realtime untuk berkolaborasi dengan teman",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" },
+  "dependencies": { "ws": "^8.18.0" },
+  "license": "MIT"
+}

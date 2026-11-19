@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gambar Bareng</title>
+<style>
+:root{--bg:#171b24;--panel:#222836;--line:#323a4d;--text:#e8ecf5;--dim:#8f9ab3;--accent:#7aa2ff}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,sans-serif}
+header{display:flex;gap:10px;align-items:center;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+header b{font-size:16px;margin-right:6px}
+input[type=text]{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 8px;width:130px}
+button{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer;font:inherit}
+button:hover{border-color:var(--accent)}
+button.on{background:var(--accent);color:#0c1426;border-color:var(--accent)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#status{margin-left:auto;color:var(--dim)}
+main{flex:1;display:flex;min-height:0}
+aside{width:190px;padding:12px;background:var(--panel);border-right:1px solid var(--line);overflow:auto;display:flex;flex-direction:column;gap:14px}
+aside h3{margin:0 0 6px;font-size:13px;font-weight:600;color:var(--dim)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.sw{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.sw i{width:22px;height:22px;border-radius:4px;border:1px solid var(--line);cursor:pointer}
+input[type=color]{width:100%;height:34px;border:1px solid var(--line);background:none;padding:0;border-radius:6px}
+input[type=range]{width:100%}
+label{display:flex;justify-content:space-between;color:var(--dim)}
+#stage{flex:1;display:flex;align-items:center;justify-content:center;padding:16px;min-width:0;overflow:auto}
+#wrap{position:relative;width:100%;max-width:calc((100vh - 110px)*16/9);aspect-ratio:16/9;background:#fff;box-shadow:0 8px 30px #0008;touch-action:none}
+#wrap canvas{position:absolute;inset:0;width:100%;height:100%}
+#cur{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.pt{position:absolute;transform:translate(-2px,-2px);font-size:12px;white-space:nowrap}
+.pt:before{content:"";display:block;width:10px;height:10px;border-radius:50%;background:var(--c);border:2px solid #fff}
+.pt span{background:var(--c);color:#fff;padding:1px 6px;border-radius:4px;margin-left:10px}
+@media(max-width:700px){main{flex-direction:column}aside{width:100%;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<header>
+  <b>Gambar Bareng</b>
+  <input type="text" id="name" maxlength="20" aria-label="Nama kamu" placeholder="Nama kamu">
+  <button id="copy">Salin link ruangan</button>
+  <span id="status">Menyambung…</span>
+</header>
+<main>
+<aside>
+  <section><h3>Alat</h3><div class="grid" id="tools"></div></section>
+  <section><h3>Warna</h3><input type="color" id="color" value="#1b1b1b"><div class="sw" id="sw"></div></section>
+  <section>
+    <label>Ukuran <span id="sv">8</span></label><input type="range" id="size" min="1" max="80" value="8">
+    <label>Opasitas <span id="ov">100%</span></label><input type="range" id="alpha" min="5" max="100" value="100">
+  </section>
+  <section><h3>Aksi</h3><div class="grid">
+    <button id="undo">Undo</button><button id="redo">Redo</button>
+    <button id="save">Simpan PNG</button><button id="clear">Hapus semua</button>
+  </div></section>
+</aside>
+<div id="stage"><div id="wrap">
+  <canvas id="main" width="1600" height="900"></canvas>
+  <canvas id="live" width="1600" height="900"></canvas>
+  <div id="cur"></div>
+</div></div>
+</main>
+<script>
+const W = 1600, H = 900;
+const $ = id => document.getElementById(id);
+const main = $('main').getContext('2d'), live = $('live').getContext('2d');
+const TOOLS = { brush:'Kuas', pencil:'Pensil', airbrush:'Airbrush', eraser:'Penghapus', line:'Garis', rect:'Kotak', ellipse:'Elips', fill:'Ember cat' };
+const FREE = ['brush','pencil','airbrush','eraser'];
+let tool = 'brush', cid = null, ws, strokes = [], active = {}, pending = [], cursors = {};
+
+// ---------- UI ----------
+Object.entries(TOOLS).forEach(([k, v]) => {
+  const b = document.createElement('button'); b.textContent = v; b.dataset.tool = k;
+  b.onclick = () => setTool(k); $('tools').append(b);
+});
+function setTool(k){ tool = k; document.querySelectorAll('#tools button').forEach(b => b.classList.toggle('on', b.dataset.tool === k)); }
+setTool('brush');
+['#1b1b1b','#ffffff','#e63946','#f77f00','#ffd60a','#2a9d8f','#4361ee','#7b2cbf','#ff8fab','#8d6e63'].forEach(c => {
+  const i = document.createElement('i'); i.style.background = c; i.onclick = () => $('color').value = c; $('sw').append(i);
+});
+$('size').oninput = e => $('sv').textContent = e.target.value;
+$('alpha').oninput = e => $('ov').textContent = e.target.value + '%';
+$('name').value = localStorage.getItem('gb-name') || 'Tamu' + Math.floor(Math.random() * 900 + 100);
+$('name').onchange = () => localStorage.setItem('gb-name', $('name').value);
+
+const room = new URLSearchParams(location.search).get('room') || Math.random().toString(36).slice(2, 8);
+if (!location.search.includes('room=')) history.replaceState(null, '', '?room=' + room);
+$('copy').onclick = () => navigator.clipboard.writeText(location.href).then(() => { $('copy').textContent = 'Link tersalin'; setTimeout(() => $('copy').textContent = 'Salin link ruangan', 1500); });
+$('undo').onclick = () => tx({ t:'undo' });
+$('redo').onclick = () => tx({ t:'redo' });
+$('clear').onclick = () => confirm('Hapus seluruh gambar untuk semua orang di ruangan ini?') && tx({ t:'clear' });
+$('save').onclick = () => {
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); x.drawImage($('main'), 0, 0);
+  const a = document.createElement('a'); a.download = 'gambar-bareng.png'; a.href = c.toDataURL(); a.click();
+};
+addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey) || e.target.tagName === 'INPUT') return;
+  if (e.key === 'z') { e.preventDefault(); tx({ t:'undo' }); }
+  if (e.key === 'y') { e.preventDefault(); tx({ t:'redo' }); }
+});
+
+// ---------- Jaringan ----------
+const tx = m => ws && ws.readyState === 1 && ws.send(JSON.stringify(m));
+function connect(){
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/?room=' + encodeURIComponent(room));
+  ws.onopen = () => $('status').textContent = 'Terhubung';
+  ws.onclose = () => { $('status').textContent = 'Terputus, menyambung ulang…'; setTimeout(connect, 1500); };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.t === 'init') { cid = m.cid; strokes = m.strokes; active = {}; redraw(); }
+    else if (m.t === 'begin') { strokes.push(m.s); if (FREE.includes(m.s.tool)) { active[m.s.id] = m.s; drawLive(); } else drawStroke(main, m.s); }
+    else if (m.t === 'pts') { const s = active[m.id]; if (s) { s.pts.push(...m.pts); drawLive(); } }
+    else if (m.t === 'end') { const s = active[m.id]; if (s) { delete active[m.id]; drawStroke(main, s); drawLive(); } }
+    else if (m.t === 'remove') { strokes = strokes.filter(s => s.id !== m.id); delete active[m.id]; redraw(); }
+    else if (m.t === 'restore') { strokes.push(m.s); drawStroke(main, m.s); }
+    else if (m.t === 'clear') { strokes = []; active = {}; redraw(); }
+    else if (m.t === 'users') $('status').textContent = m.n + ' orang di ruangan ini';
+    else if (m.t === 'cur') showCursor(m);
+    else if (m.t === 'gone') { cursors[m.cid]?.remove(); delete cursors[m.cid]; }
+  };
+}
+connect();
+setInterval(() => { if (pending.length && pending.id) { tx({ t:'pts', id: pending.id, pts: pending.splice(0) }); } }, 40);
+
+function showCursor(m){
+  let el = cursors[m.cid];
+  if (!el) { el = cursors[m.cid] = document.createElement('div'); el.className = 'pt'; $('cur').append(el); }
+  el.style.setProperty('--c', m.color); el.innerHTML = '<span></span>'; el.firstChild.textContent = m.name || 'Teman';
+  el.style.left = m.x / W * 100 + '%'; el.style.top = m.y / H * 100 + '%';
+}
+
+// ---------- Menggambar ----------
+function drawStroke(ctx, s, preview){
+  const p = s.pts;
+  if (s.tool === 'fill') return flood(ctx, p[0], p[1], s.color);
+  ctx.save();
+  ctx.globalAlpha = s.alpha; ctx.lineCap = ctx.lineJoin = 'round';
+  ctx.strokeStyle = ctx.fillStyle = s.color; ctx.lineWidth = s.size;
+  if (s.tool === 'eraser') { if (preview) { ctx.globalAlpha = .4; ctx.strokeStyle = '#888'; } else ctx.globalCompositeOperation = 'destination-out'; }
+  if (s.tool === 'pencil') ctx.lineWidth = Math.max(1, s.size * .35);
+  if (s.tool === 'airbrush') { ctx.shadowColor = s.color; ctx.shadowBlur = s.size * 1.2; ctx.lineWidth = s.size * .6; }
+  ctx.beginPath();
+  if (s.tool === 'line') { ctx.moveTo(p[0], p[1]); ctx.lineTo(p[p.length - 2], p[p.length - 1]); }
+  else if (s.tool === 'rect') ctx.rect(p[0], p[1], p[p.length - 2] - p[0], p[p.length - 1] - p[1]);
+  else if (s.tool === 'ellipse') { const x1 = p[p.length - 2], y1 = p[p.length - 1];
+    ctx.ellipse((p[0] + x1) / 2, (p[1] + y1) / 2, Math.abs(x1 - p[0]) / 2 || .1, Math.abs(y1 - p[1]) / 2 || .1, 0, 0, 7); }
+  else {
+    ctx.moveTo(p[0], p[1]);
+    if (p.length === 2) ctx.lineTo(p[0] + .01, p[1]);
+    for (let i = 2; i < p.length - 2; i += 2) ctx.quadraticCurveTo(p[i], p[i + 1], (p[i] + p[i + 2]) / 2, (p[i + 1] + p[i + 3]) / 2);
+    if (p.length > 2) ctx.lineTo(p[p.length - 2], p[p.length - 1]);
+  }
+  ctx.stroke(); ctx.restore();
+}
+function drawLive(){ live.clearRect(0, 0, W, H); Object.values(active).forEach(s => drawStroke(live, s, true)); }
+function redraw(){ main.clearRect(0, 0, W, H); live.clearRect(0, 0, W, H); strokes.forEach(s => drawStroke(main, s)); }
+
+function flood(ctx, x, y, hex){
+  x |= 0; y |= 0; if (x < 0 || y < 0 || x >= W || y >= H) return;
+  const img = ctx.getImageData(0, 0, W, H), d = img.data, c = parseInt(hex.slice(1), 16);
+  const fr = c >> 16, fg = c >> 8 & 255, fb = c & 255, i0 = (y * W + x) * 4, t = [d[i0], d[i0+1], d[i0+2], d[i0+3]];
+  if (t[0] === fr && t[1] === fg && t[2] === fb && t[3] === 255) return;
+  const ok = i => Math.abs(d[i]-t[0]) + Math.abs(d[i+1]-t[1]) + Math.abs(d[i+2]-t[2]) + Math.abs(d[i+3]-t[3]) < 60;
+  const seen = new Uint8Array(W * H), st = [x, y];
+  while (st.length) {
+    const cy = st.pop(), cx = st.pop(), p = cy * W + cx;
+    if (cx < 0 || cy < 0 || cx >= W || cy >= H || seen[p]) continue;
+    seen[p] = 1; if (!ok(p * 4)) continue;
+    d[p*4] = fr; d[p*4+1] = fg; d[p*4+2] = fb; d[p*4+3] = 255;
+    st.push(cx+1, cy, cx-1, cy, cx, cy+1, cx, cy-1);
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+let cur = null, lastCur = 0;
+const pos = e => { const r = $('wrap').getBoundingClientRect(); return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H]; };
+const wrap = $('wrap');
+wrap.addEventListener('pointerdown', e => {
+  if (e.button > 0) return;
+  wrap.setPointerCapture(e.pointerId);
+  const [x, y] = pos(e);
+  cur = { id: cid + '-' + Date.now() + Math.random().toString(36).slice(2, 5), tool, color: $('color').value,
+          size: +$('size').value, alpha: $('alpha').value / 100, pts: [x, y], cid };
+  if (tool === 'fill') { strokes.push(cur); drawStroke(main, cur); tx({ t:'begin', s: cur }); tx({ t:'end', id: cur.id }); cur = null; return; }
+  active[cur.id] = cur; drawLive();
+  if (FREE.includes(tool)) { strokes.push(cur); tx({ t:'begin', s: { ...cur, pts: [x, y] } }); pending.id = cur.id; }
+});
+wrap.addEventListener('pointermove', e => {
+  const [x, y] = pos(e), now = performance.now();
+  if (now - lastCur > 50) { lastCur = now; tx({ t:'cur', x, y, name: $('name').value, color: $('color').value }); }
+  if (!cur) return;
+  if (FREE.includes(cur.tool)) { cur.pts.push(x, y); pending.push(x, y); }
+  else cur.pts = [cur.pts[0], cur.pts[1], x, y];
+  drawLive();
+});
+const finish = () => {
+  if (!cur) return;
+  const s = cur; cur = null; delete active[s.id];
+  if (FREE.includes(s.tool)) { tx({ t:'pts', id: s.id, pts: pending.splice(0) }); pending.id = null; tx({ t:'end', id: s.id }); }
+  else { strokes.push(s); tx({ t:'begin', s }); tx({ t:'end', id: s.id }); }
+  drawStroke(main, s); drawLive();
+};
+wrap.addEventListener('pointerup', finish);
+wrap.addEventListener('pointercancel', finish);
+</script>
+</body>
+</html>
